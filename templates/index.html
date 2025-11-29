@@ -1,0 +1,330 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1 class="mb-3">Upload Photos</h1>
+<form method="post" action="/upload" enctype="multipart/form-data" class="mb-4">
+  <div class="input-group">
+    <input type="file" name="photos" multiple class="form-control" accept="image/*">
+    <button class="btn btn-primary" type="submit">Upload</button>
+  </div>
+  <div class="form-text">JPEG/PNG/HEIC supported. GPS from EXIF will be used.</div>
+</form>
+
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <h2 class="h5">Photos</h2>
+  <div class="d-flex gap-2">
+    <button class="btn btn-danger btn-sm" id="clearAllBtn">Clear All</button>
+    <a class="btn btn-success btn-sm" href="/export/kmz">Export KMZ (with images)</a>
+  </div>
+</div>
+<table class="table table-sm table-striped">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Filename</th>
+      <th>GPS</th>
+      <th>Taken At</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in photos %}
+    <tr>
+      <td><strong>{{ loop.index }}</strong></td>
+      <td>{{ p.filename }}</td>
+      <td>
+        {% if p.lat is not none and p.lng is not none %}
+          {{ '%.6f'|format(p.lat) }}, {{ '%.6f'|format(p.lng) }}
+        {% else %}
+          <span class="text-muted">No GPS</span>
+          <button class="btn btn-outline-primary btn-sm ms-2 set-gps" data-fn="{{ p.filename }}">Set GPS</button>
+        {% endif %}
+      </td>
+      <td>{{ p.taken_at or '' }}</td>
+      <td>
+        <button class="btn btn-outline-info btn-sm me-1 preview-photo" data-fn="{{ p.filename }}" data-lat="{{ p.lat }}" data-lng="{{ p.lng }}">Preview</button>
+        <button class="btn btn-outline-secondary btn-sm me-1 edit-photo" data-fn="{{ p.filename }}" data-taken="{{ p.taken_at or '' }}">Edit</button>
+        <button class="btn btn-outline-danger btn-sm delete-photo" data-fn="{{ p.filename }}">Delete</button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<!-- Set GPS Modal -->
+<div class="modal fade" id="gpsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Set GPS</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2"><strong id="gpsFilename"></strong></div>
+        <div class="row g-2">
+          <div class="col">
+            <label class="form-label small">Latitude</label>
+            <input type="number" step="any" class="form-control" id="gpsLat" placeholder="e.g. 37.4219">
+          </div>
+          <div class="col">
+            <label class="form-label small">Longitude</label>
+            <input type="number" step="any" class="form-control" id="gpsLng" placeholder="e.g. -122.0840">
+          </div>
+        </div>
+        <div class="form-text mb-2">Use decimal degrees. North/East positive, South/West negative.</div>
+        <div class="border rounded" id="gpsMap" style="height:300px;"></div>
+        <div class="form-text">Click the map to set coordinates. Drag marker to adjust.</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="saveGpsBtn">Save</button>
+      </div>
+    </div>
+  </div>
+  </div>
+
+<!-- Edit Metadata Modal -->
+<div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit Photo Metadata</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Filename</label>
+          <input type="text" class="form-control" id="editFilename">
+          <div class="form-text">Include extension (.jpg, .png, etc.)</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Taken At</label>
+          <input type="datetime-local" class="form-control" id="editTakenAt">
+          <div class="form-text">Leave empty to keep existing date</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="saveEditBtn">Save Changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Metadata Modal -->
+<div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit Photo Metadata</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Filename</label>
+          <input type="text" class="form-control" id="editFilename">
+          <div class="form-text">Include extension (.jpg, .png, etc.)</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Taken At</label>
+          <input type="datetime-local" class="form-control" id="editTakenAt">
+          <div class="form-text">Leave empty to keep existing date</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="saveEditBtn">Save Changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Full Image Modal -->
+<div class="modal fade" id="imageModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title" id="modalFilename">Image</h5>
+          <div class="small text-muted" id="modalCoords"></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body text-center">
+        <img id="modalImage" src="" class="img-fluid" alt="Full image" />
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let gpsModal, gpsFilenameEl, gpsLatEl, gpsLngEl, currentFn;
+let editModal, editFilenameEl, editTakenAtEl, editOriginalFn;
+let gpsLeafletMap = null;
+let gpsMarker = null;
+document.addEventListener('DOMContentLoaded', () => {
+  gpsModal = new bootstrap.Modal(document.getElementById('gpsModal'));
+  gpsFilenameEl = document.getElementById('gpsFilename');
+  gpsLatEl = document.getElementById('gpsLat');
+  gpsLngEl = document.getElementById('gpsLng');
+  
+  editModal = new bootstrap.Modal(document.getElementById('editModal'));
+  editFilenameEl = document.getElementById('editFilename');
+  editTakenAtEl = document.getElementById('editTakenAt');
+
+  // Preview photo handler
+  document.querySelectorAll('.preview-photo').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const fn = btn.getAttribute('data-fn');
+      const lat = btn.getAttribute('data-lat');
+      const lng = btn.getAttribute('data-lng');
+      
+      document.getElementById('modalFilename').textContent = fn;
+      document.getElementById('modalCoords').textContent = lat && lng && lat !== 'None' && lng !== 'None' 
+        ? `Lat: ${parseFloat(lat).toFixed(6)}, Lng: ${parseFloat(lng).toFixed(6)}` 
+        : 'No GPS data';
+      document.getElementById('modalImage').src = `/uploads/${fn}`;
+      
+      const modal = new bootstrap.Modal(document.getElementById('imageModal'));
+      modal.show();
+    });
+  });
+  
+  // Edit photo handler
+  document.querySelectorAll('.edit-photo').forEach(btn => {
+    btn.addEventListener('click', () => {
+      editOriginalFn = btn.getAttribute('data-fn');
+      const takenAt = btn.getAttribute('data-taken');
+      
+      editFilenameEl.value = editOriginalFn;
+      if (takenAt && takenAt !== 'None') {
+        // Convert ISO format to datetime-local format
+        const date = new Date(takenAt);
+        if (!isNaN(date)) {
+          editTakenAtEl.value = date.toISOString().slice(0, 16);
+        }
+      } else {
+        editTakenAtEl.value = '';
+      }
+      
+      editModal.show();
+    });
+  });
+  
+  // Save edit button
+  document.getElementById('saveEditBtn').addEventListener('click', async () => {
+    const newFilename = editFilenameEl.value.trim();
+    const takenAt = editTakenAtEl.value;
+    
+    if (!newFilename) {
+      alert('Filename cannot be empty');
+      return;
+    }
+    
+    const res = await fetch('/edit_metadata', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: editOriginalFn,
+        new_filename: newFilename,
+        taken_at: takenAt ? new Date(takenAt).toISOString() : ''
+      })
+    });
+    
+    const data = await res.json();
+    if (data.ok) {
+      editModal.hide();
+      location.reload();
+    } else {
+      alert('Error: ' + (data.error || 'Failed to update'));
+    }
+  });
+
+  document.querySelectorAll('.set-gps').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentFn = btn.getAttribute('data-fn');
+      gpsFilenameEl.textContent = currentFn;
+      gpsLatEl.value = '';
+      gpsLngEl.value = '';
+      gpsModal.show();
+    });
+  });
+
+  // Initialize the Leaflet map when modal is shown
+  document.getElementById('gpsModal').addEventListener('shown.bs.modal', () => {
+    const mapDiv = document.getElementById('gpsMap');
+    if (!gpsLeafletMap) {
+      gpsLeafletMap = L.map(mapDiv).setView([20, 0], 2);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(gpsLeafletMap);
+      gpsLeafletMap.on('click', (e) => {
+        setMapCoord(e.latlng.lat, e.latlng.lng);
+      });
+    }
+    setTimeout(() => gpsLeafletMap.invalidateSize(), 50);
+
+    // If inputs already have values, center there
+    const lat = parseFloat(gpsLatEl.value);
+    const lng = parseFloat(gpsLngEl.value);
+    if (!isNaN(lat) && !isNaN(lng)) {
+      setMapCoord(lat, lng, true);
+    }
+  });
+
+  function setMapCoord(lat, lng, noZoom) {
+    gpsLatEl.value = lat.toFixed(6);
+    gpsLngEl.value = lng.toFixed(6);
+    if (gpsMarker) {
+      gpsLeafletMap.removeLayer(gpsMarker);
+    }
+    gpsMarker = L.marker([lat, lng], { draggable: true }).addTo(gpsLeafletMap);
+    gpsMarker.on('dragend', (e) => {
+      const ll = e.target.getLatLng();
+      gpsLatEl.value = ll.lat.toFixed(6);
+      gpsLngEl.value = ll.lng.toFixed(6);
+    });
+    if (!noZoom) {
+      gpsLeafletMap.setView([lat, lng], 14);
+    }
+  }
+
+  document.getElementById('saveGpsBtn').addEventListener('click', async () => {
+    const lat = parseFloat(gpsLatEl.value);
+    const lng = parseFloat(gpsLngEl.value);
+    if (isNaN(lat) || isNaN(lng)) { alert('Please enter valid numbers'); return; }
+    const res = await fetch('/associate', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({filename: currentFn, lat, lng})
+    });
+    const data = await res.json();
+    if (!data.ok) { alert('Failed to save GPS'); return; }
+    location.reload();
+  });
+
+  // Delete photo handler
+  document.querySelectorAll('.delete-photo').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const fn = btn.getAttribute('data-fn');
+      if (!confirm(`Delete ${fn}?`)) return;
+      const res = await fetch('/delete', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({filename: fn})
+      });
+      const data = await res.json();
+      if (!data.ok) { alert('Failed to delete'); return; }
+      location.reload();
+    });
+  });
+
+  // Clear all handler
+  document.getElementById('clearAllBtn').addEventListener('click', async () => {
+    if (!confirm('Delete ALL photos and clear database? This cannot be undone.')) return;
+    const res = await fetch('/clear_all', { method: 'POST' });
+    const data = await res.json();
+    if (!data.ok) { alert('Failed to clear all'); return; }
+    location.reload();
+  });
+});
+</script>
+{% endblock %}

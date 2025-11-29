@@ -1,0 +1,287 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1 class="mb-3">Map</h1>
+
+<div class="row">
+  <div class="col-lg-9">
+    <div id="map" style="height:600px;" class="border rounded mb-3"></div>
+  </div>
+  <div class="col-lg-3">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Export Options</h5>
+        <button class="btn btn-success btn-sm w-100 mb-2" id="exportAllBtn">Export All to KMZ</button>
+        <hr>
+        <p class="small text-muted mb-2">Draw a polygon or rectangle to select specific photos:</p>
+        <button class="btn btn-primary btn-sm w-100" id="exportGeofenceBtn">Export Geofence KMZ</button>
+        <button class="btn btn-outline-secondary btn-sm w-100 mt-2" id="clearGeofenceBtn">Clear Geofence</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="status" class="alert alert-info">Loading map...</div>
+
+<!-- Full Image Modal -->
+<div class="modal fade" id="imageModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title" id="modalFilename">Image</h5>
+          <div class="small text-muted" id="modalCoords"></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body text-center">
+        <img id="modalImage" src="" class="img-fluid" alt="Full image" />
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let map, markersLayer, drawnItems, currentGeofence = null;
+
+async function fetchPhotos() {
+  const res = await fetch('/api/photos');
+  const data = await res.json();
+  return data.photos || [];
+}
+
+function initMap() {
+  map = L.map('map').setView([20, 0], 2);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+  markersLayer = L.layerGroup().addTo(map);
+  drawnItems = new L.FeatureGroup().addTo(map);
+
+  const drawControl = new L.Control.Draw({
+    edit: { featureGroup: drawnItems },
+    draw: {
+      polygon: { shapeOptions: { color: '#3388ff', fillOpacity: 0.2 } },
+      rectangle: true,
+      polyline: false,
+      circle: false,
+      circlemarker: false,
+      marker: false
+    }
+  });
+  map.addControl(drawControl);
+
+  map.on(L.Draw.Event.CREATED, e => {
+    drawnItems.clearLayers();
+    drawnItems.addLayer(e.layer);
+    currentGeofence = e.layer.toGeoJSON().geometry;
+  });
+
+  map.on(L.Draw.Event.DELETED, () => {
+    currentGeofence = null;
+  });
+  
+  // Force map to redraw after container is ready
+  setTimeout(() => map.invalidateSize(), 100);
+}
+
+function addMarker(photo, index) {
+  if (!photo.lat || !photo.lng) return;
+  
+  const thumbUrl = `/uploads/${photo.filename}`;
+  const m = L.marker([photo.lat, photo.lng]);
+  
+  const popupHtml = `
+    <div style="width:200px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">
+        <span style="background:#007bff;color:white;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">${index}</span>
+        <strong style="font-size:14px;">${photo.filename}</strong>
+      </div>
+      <img src="${thumbUrl}" style="max-width:180px;cursor:pointer;" class="photo-thumb" data-fn="${photo.filename}" data-lat="${photo.lat}" data-lng="${photo.lng}">
+      ${photo.taken_at ? `<br><small>${photo.taken_at}</small>` : ''}
+    </div>
+  `;
+  
+  const popup = L.popup().setContent(popupHtml);
+  m.bindPopup(popup);
+  
+  // Add click handler when popup opens
+  m.on('popupopen', () => {
+    const img = document.querySelector('.photo-thumb');
+    if (img) {
+      img.addEventListener('click', () => {
+        const fn = img.getAttribute('data-fn');
+        const lat = img.getAttribute('data-lat');
+        const lng = img.getAttribute('data-lng');
+        
+        document.getElementById('modalFilename').textContent = fn;
+        document.getElementById('modalCoords').textContent = lat && lng ? `Lat: ${parseFloat(lat).toFixed(6)}, Lng: ${parseFloat(lng).toFixed(6)}` : 'No GPS';
+        document.getElementById('modalImage').src = `/uploads/${fn}`;
+        
+        const modal = new bootstrap.Modal(document.getElementById('imageModal'));
+        modal.show();
+      });
+    }
+  });
+  
+  markersLayer.addLayer(m);
+}
+
+function addMultiMarker(photos, indices) {
+  if (!photos.length) return;
+  
+  const firstPhoto = photos[0];
+  const lat = firstPhoto.lat;
+  const lng = firstPhoto.lng;
+  let currentIndex = 0;
+  
+  // Custom icon with count badge
+  const icon = L.divIcon({
+    className: 'custom-marker-icon',
+    html: `<div style="position:relative;"><img src="https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png" style="width:25px;height:41px;"/><span style="position:absolute;top:-5px;right:-5px;background:red;color:white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:bold;">${photos.length}</span></div>`,
+    iconSize: [25, 41],
+    iconAnchor: [12, 41]
+  });
+  
+  const m = L.marker([lat, lng], { icon: icon });
+  
+  function buildPopupContent() {
+    const p = photos[currentIndex];
+    const idx = indices[currentIndex];
+    const thumbUrl = `/uploads/${p.filename}`;
+    return `
+      <div style="width:220px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="background:#007bff;color:white;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">${idx}</span>
+            <strong style="font-size:12px;">${currentIndex + 1} of ${photos.length}</strong>
+          </div>
+          <div>
+            ${photos.length > 1 ? `<button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="window.prevPhoto()">◀</button>
+            <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="window.nextPhoto()">▶</button>` : ''}
+          </div>
+        </div>
+        <strong>${p.filename}</strong><br>
+        <img src="${thumbUrl}" style="max-width:200px;cursor:pointer;" class="photo-thumb" data-fn="${p.filename}" data-lat="${p.lat}" data-lng="${p.lng}">
+        ${p.taken_at ? `<br><small>${p.taken_at}</small>` : ''}
+      </div>
+    `;
+  }
+  
+  window.prevPhoto = () => {
+    currentIndex = (currentIndex - 1 + photos.length) % photos.length;
+    m.setPopupContent(buildPopupContent());
+  };
+  
+  window.nextPhoto = () => {
+    currentIndex = (currentIndex + 1) % photos.length;
+    m.setPopupContent(buildPopupContent());
+  };
+  
+  const popup = L.popup().setContent(buildPopupContent());
+  m.bindPopup(popup);
+  
+  m.on('popupopen', () => {
+    const img = document.querySelector('.photo-thumb');
+    if (img) {
+      img.addEventListener('click', () => {
+        const fn = img.getAttribute('data-fn');
+        const lat = img.getAttribute('data-lat');
+        const lng = img.getAttribute('data-lng');
+        
+        document.getElementById('modalFilename').textContent = fn;
+        document.getElementById('modalCoords').textContent = lat && lng ? `Lat: ${parseFloat(lat).toFixed(6)}, Lng: ${parseFloat(lng).toFixed(6)}` : 'No GPS';
+        document.getElementById('modalImage').src = `/uploads/${fn}`;
+        
+        const modal = new bootstrap.Modal(document.getElementById('imageModal'));
+        modal.show();
+      });
+    }
+  });
+  
+  markersLayer.addLayer(m);
+}
+
+async function loadPhotos() {
+  const photos = await fetchPhotos();
+  markersLayer.clearLayers();
+  const bounds = [];
+  
+  // Group photos by location with indices
+  const locationGroups = {};
+  photos.forEach((p, idx) => {
+    if (p.lat && p.lng) {
+      const key = `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`;
+      if (!locationGroups[key]) {
+        locationGroups[key] = { photos: [], indices: [] };
+      }
+      locationGroups[key].photos.push(p);
+      locationGroups[key].indices.push(idx + 1);
+      bounds.push([p.lat, p.lng]);
+    }
+  });
+  
+  // Create markers with multi-photo support
+  Object.keys(locationGroups).forEach(key => {
+    const group = locationGroups[key];
+    if (group.photos.length === 1) {
+      addMarker(group.photos[0], group.indices[0]);
+    } else {
+      addMultiMarker(group.photos, group.indices);
+    }
+  });
+  
+  if (bounds.length) {
+    map.fitBounds(bounds, { padding: [20, 20] });
+  }
+}
+
+// Export all photos
+document.getElementById('exportAllBtn').addEventListener('click', async () => {
+  window.location.href = '/export/kmz';
+});
+
+// Export geofence
+document.getElementById('exportGeofenceBtn').addEventListener('click', async () => {
+  if (!currentGeofence) {
+    alert('Draw a geofence first (polygon or rectangle).');
+    return;
+  }
+  
+  const res = await fetch('/export/geofence', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ geofence: currentGeofence })
+  });
+  
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `geofence_${Date.now()}.kmz`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// Clear geofence
+document.getElementById('clearGeofenceBtn').addEventListener('click', () => {
+  drawnItems.clearLayers();
+  currentGeofence = null;
+});
+
+// Initialize after DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('DOM ready, initializing map...');
+  try {
+    initMap();
+    console.log('Map initialized');
+    loadPhotos();
+    document.getElementById('status').style.display = 'none';
+  } catch (err) {
+    console.error('Map initialization error:', err);
+    document.getElementById('status').textContent = 'Error loading map: ' + err.message;
+    document.getElementById('status').className = 'alert alert-danger';
+  }
+});
+</script>
+{% endblock %}
