@@ -1,0 +1,9 @@
+{
+  "expo": {
+    "name": "GeoPic Mobile",
+    "slug": "geopic-mobile",
+    "version": "0.1.0",
+    "platforms": ["ios", "android"],
+    "sdkVersion": "49.0.0"
+  }
+}
