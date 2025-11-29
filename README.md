@@ -1,4 +1,4 @@
-# GeoPic
+Yet can you attempt to detect node dot JS. I just installed# GeoPic
 
 A simple Flask app to upload images, read GPS from EXIF, manually set coordinates when missing, and export a KMZ with embedded images as placemarks.
 

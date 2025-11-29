@@ -6,6 +6,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Camera } from 'expo-camera';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { WebView } from 'react-native-webview';
 
 const QUEUE_KEY = 'geopic_queue_v1';
 const SERVER_URL_KEY = 'geopic_server_url';
@@ -218,12 +219,19 @@ export default function App() {
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => setScreen('camera')} style={styles.tab}><Text>Camera</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => setScreen('queue')} style={styles.tab}><Text>Queue ({queue.length})</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => setScreen('map')} style={styles.tab}><Text>Map</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => setScreen('settings')} style={styles.tab}><Text>Settings</Text></TouchableOpacity>
       </View>
       <View style={{ flex: 1 }}>
         {screen === 'camera' && renderCamera()}
         {screen === 'queue' && renderQueue()}
         {screen === 'settings' && renderSettings()}
+        {screen === 'map' && (
+          <WebView
+            source={{ uri: (serverUrl || '').replace(/\/$/, '') + '/map', headers: token ? { Authorization: `Bearer ${token}` } : {} }}
+            style={{ flex: 1 }}
+          />
+        )}
       </View>
     </View>
   );

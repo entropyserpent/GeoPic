@@ -22,6 +22,9 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 init_db()
 
+# Optional server-side token to require uploads from mobile clients
+GEO_TOKEN = os.environ.get('GEO_TOKEN')
+
 def allowed_file(filename: str) -> bool:
     return os.path.splitext(filename.lower())[1] in ALLOWED_EXTENSIONS
 
@@ -60,6 +63,54 @@ def upload():
         lat, lng, taken_at = extract_gps_datetime(dest)
         add_photo({'filename': fname, 'path': dest, 'lat': lat, 'lng': lng, 'taken_at': taken_at})
     return redirect(url_for('index'))
+
+
+@app.route('/api/upload-photo', methods=['POST'])
+def api_upload_photo():
+    # Accept a single file upload from mobile app and return JSON
+    # if server enforces a token, check Authorization header
+    if GEO_TOKEN:
+        auth = request.headers.get('Authorization', '')
+        if not auth or not auth.startswith('Bearer ') or auth.split('Bearer ')[1].strip() != GEO_TOKEN:
+            return jsonify({'ok': False, 'error': 'Unauthorized'}), 401
+
+    f = request.files.get('file') or request.files.get('photo')
+    if not f:
+        return jsonify({'ok': False, 'error': 'file required'}), 400
+    fname = secure_filename(f.filename) if f.filename else None
+    if not fname:
+        fname = f'upload_{int(datetime.now().timestamp())}.jpg'
+    if not allowed_file(fname):
+        return jsonify({'ok': False, 'error': 'file type not allowed'}), 400
+
+    dest = os.path.join(app.config['UPLOAD_FOLDER'], fname)
+    # If file exists, add a numeric suffix
+    base, ext = os.path.splitext(fname)
+    i = 1
+    while os.path.exists(dest):
+        fname = f"{base}_{i}{ext}"
+        dest = os.path.join(app.config['UPLOAD_FOLDER'], fname)
+        i += 1
+
+    try:
+        f.save(dest)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+    # optional metadata
+    lat = request.form.get('lat')
+    lng = request.form.get('lng')
+    taken_at = request.form.get('taken_at')
+    try:
+        lat_f = float(lat) if lat else None
+        lng_f = float(lng) if lng else None
+    except Exception:
+        lat_f = None
+        lng_f = None
+
+    add_photo({'filename': fname, 'path': dest, 'lat': lat_f, 'lng': lng_f, 'taken_at': taken_at})
+
+    return jsonify({'ok': True, 'filename': fname, 'url': url_for('serve_upload', filename=fname, _external=True)})
 
 @app.route('/export/kmz')
 def export_kmz():
@@ -115,6 +166,32 @@ def clear_all_photos():
 @app.route('/api/photos')
 def api_photos():
     photos = get_photos()
+    # support optional since filter (ISO datetime string or timestamp)
+    since = request.args.get('since')
+    if since:
+        filtered = []
+        for p in photos:
+            taken = p.get('taken_at')
+            if not taken:
+                continue
+            try:
+                # try ISO format first
+                dt = None
+                try:
+                    dt = datetime.fromisoformat(taken)
+                except Exception:
+                    # fallback to timestamp
+                    dt = datetime.fromtimestamp(float(taken))
+                since_dt = None
+                try:
+                    since_dt = datetime.fromisoformat(since)
+                except Exception:
+                    since_dt = datetime.fromtimestamp(float(since))
+                if dt > since_dt:
+                    filtered.append(p)
+            except Exception:
+                continue
+        photos = filtered
     return jsonify({'photos': photos})
 
 @app.route('/export/geofence', methods=['POST'])
