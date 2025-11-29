@@ -11,6 +11,7 @@ import { WebView } from 'react-native-webview';
 const QUEUE_KEY = 'geopic_queue_v1';
 const SERVER_URL_KEY = 'geopic_server_url';
 const TOKEN_KEY = 'geopic_token';
+const LAST_SYNC_KEY = 'geopic_last_sync_v1';
 
 export default function App() {
   const [screen, setScreen] = useState('camera');
@@ -30,6 +31,18 @@ export default function App() {
       setHasLocationPermission(locStatus.status === 'granted');
       loadQueue();
       loadSettings();
+    })();
+  }, []);
+
+  useEffect(() => {
+    // load last sync time
+    (async () => {
+      try {
+        const s = await AsyncStorage.getItem(LAST_SYNC_KEY);
+        if (s) {
+          // no-op for now; we keep as string when needed
+        }
+      } catch (e) { }
     })();
   }, []);
 
@@ -67,6 +80,69 @@ export default function App() {
   async function persistQueue(newQueue) {
     setQueue(newQueue);
     await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(newQueue));
+  }
+
+  async function saveLastSync(ts) {
+    try {
+      await AsyncStorage.setItem(LAST_SYNC_KEY, ts);
+    } catch (e) { }
+  }
+
+  async function getLastSync() {
+    try {
+      const s = await AsyncStorage.getItem(LAST_SYNC_KEY);
+      return s;
+    } catch (e) { return null; }
+  }
+
+  const [serverPhotos, setServerPhotos] = useState([]);
+
+  async function syncServerPhotos() {
+    if (!serverUrl) {
+      Alert.alert('Set server URL first');
+      return;
+    }
+    try {
+      const last = await getLastSync();
+      const q = last ? `?since=${encodeURIComponent(last)}` : '';
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const resp = await fetch((serverUrl || '').replace(/\/$/, '') + '/api/photos' + q, { headers });
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      const photos = data.photos || [];
+      setServerPhotos(photos);
+      const now = new Date().toISOString();
+      await saveLastSync(now);
+      Alert.alert('Sync complete', `${photos.length} photos found`);
+    } catch (err) {
+      console.error('sync', err);
+      Alert.alert('Sync failed', String(err));
+    }
+  }
+
+  async function importServerPhoto(p) {
+    try {
+      const url = p.url || p.path || '';
+      const filename = p.filename || url.split('/').pop() || makeFilename();
+      const dest = FileSystem.documentDirectory + filename;
+      await FileSystem.downloadAsync(url, dest);
+      const record = {
+        id: 'srv-' + Date.now().toString(),
+        filename,
+        localUri: dest,
+        lat: p.lat || null,
+        lng: p.lng || null,
+        taken_at: p.taken_at || new Date().toISOString(),
+        status: 'synced'
+      };
+      const newQueue = [record, ...(queue || [])];
+      await persistQueue(newQueue);
+      Alert.alert('Imported', filename);
+    } catch (err) {
+      console.error('import', err);
+      Alert.alert('Import failed', String(err));
+    }
   }
 
   function makeFilename() {
@@ -176,6 +252,7 @@ export default function App() {
       <View style={{ flex: 1, padding: 8 }}>
         <Button title="Back to Camera" onPress={() => setScreen('camera')} />
         <Button title="Upload All" onPress={uploadAll} />
+        <Button title="Sync From Server" onPress={syncServerPhotos} />
         <FlatList
           data={queue}
           keyExtractor={(i) => i.id}
@@ -197,6 +274,28 @@ export default function App() {
             </View>
           )}
         />
+
+        {serverPhotos && serverPhotos.length > 0 && (
+          <View style={{ marginTop: 12 }}>
+            <Text style={{ fontWeight: 'bold' }}>Server Photos</Text>
+            <FlatList
+              data={serverPhotos}
+              keyExtractor={(i) => (i.filename || i.url || Math.random()).toString()}
+              renderItem={({ item }) => (
+                <View style={styles.queueItem}>
+                  <Image source={{ uri: item.url || item.path }} style={styles.thumb} />
+                  <View style={{ flex: 1 }}>
+                    <Text>{item.filename || item.url}</Text>
+                    <Text>{item.taken_at}</Text>
+                    <View style={{ flexDirection: 'row' }}>
+                      <Button title="Import" onPress={() => importServerPhoto(item)} />
+                    </View>
+                  </View>
+                </View>
+              )}
+            />
+          </View>
+        )}
       </View>
     );
   }
